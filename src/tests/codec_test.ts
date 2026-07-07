@@ -1,15 +1,13 @@
-// Unit tests for contenthash codec decoding.
+// Unit tests for contenthash codec decoding, using real published vectors.
 
 import { assertEquals } from "jsr:@std/assert@1";
 import { decodeContenthash } from "../codec.ts";
 
-/** Build a valid ABI-encoded contenthash response from raw contenthash hex. */
-function buildContenthashResponse(contenthexHex: string): string {
-  // ABI encoding of `bytes`: offset(0x20) + length + data (padded)
-  const len = contenthexHex.length / 2;
+/** Wrap raw contenthash payload hex in an ABI `bytes` response: offset + length + data. */
+function abiBytes(payloadHex: string): string {
+  const len = payloadHex.length / 2;
   const lenHex = len.toString(16).padStart(64, "0");
-  // Pad data to a multiple of 64 hex chars (32 bytes)
-  let data = contenthexHex;
+  let data = payloadHex;
   while (data.length % 64) data += "0";
   return "0x" +
     "0000000000000000000000000000000000000000000000000000000000000020" +
@@ -17,49 +15,47 @@ function buildContenthashResponse(contenthexHex: string): string {
     data;
 }
 
-Deno.test("decodeContenthash: empty contenthash returns state 'none'", () => {
-  // ABI: offset(0x20) + length(0) + no data
+Deno.test("decodeContenthash: empty bytes → { status: 'none' }", () => {
   const res = "0x" +
     "0000000000000000000000000000000000000000000000000000000000000020" +
     "0000000000000000000000000000000000000000000000000000000000000000";
-  assertEquals(decodeContenthash(res), { state: "none" });
+  assertEquals(decodeContenthash(res), { status: "none" });
 });
 
-Deno.test("decodeContenthash: IPFS CIDv1 codec (e301) decodes to base32 multibase", () => {
-  // e301 + dag-pb(0x70) + sha256(0x12) + len(0x20) + 32-byte hash
-  const hash = "a".repeat(64); // 32 bytes of 0xaa
-  const contenthexHex = "e30101701220" + hash;
-  const res = buildContenthashResponse(contenthexHex);
-  const decoded = decodeContenthash(res);
-  assertEquals("kind" in decoded, true);
-  if ("kind" in decoded) {
-    assertEquals(decoded.kind, "ipfs");
-    assertEquals(decoded.ref.startsWith("b"), true); // multibase prefix 'b'
-    assertEquals(decoded.ref.length > 1, true);
-  }
+Deno.test("decodeContenthash: real IPFS contenthash → CIDv1 base32", () => {
+  // Encodes IPFS CID QmaeMmgMYE5Ro1ojpmNwyLBtBNT86ug52K4LLdoHDEM1XG
+  // as an EIP-1577 contenthash (e301 + CIDv1 bytes).
+  const res = abiBytes(
+    "e30101701220b6d58b9d35febf61cef8db33f793df1c7b5ea5c0164b9a0ba436c381790b7c4b",
+  );
+  assertEquals(decodeContenthash(res), {
+    status: "ref",
+    kind: "ipfs",
+    ref: "bafybeifw2wfz2np6x5q456g3gp3zhxy4pnpklqawjonaxjbwyoaxsc34jm",
+  });
 });
 
-Deno.test("decodeContenthash: Swarm codec (e40101fa011b20) decodes to hex reference", () => {
+Deno.test("decodeContenthash: real IPNS contenthash → libp2p-key base36", () => {
+  // Encodes the author's IPNS name as an EIP-1577 contenthash
+  // (e501 + libp2p-key CIDv1 bytes).
+  const res = abiBytes(
+    "e50101721220a1dc5d90d7272c0fd9150414f14c80c71de5d243c2f23165e2ddb495cbbcd05f",
+  );
+  assertEquals(decodeContenthash(res), {
+    status: "ref",
+    kind: "ipns",
+    ref: "k2k4r8ng8uzrtqb5ham8kao889m8qezu96z4w3lpinyqghum43veb6n3",
+  });
+});
+
+Deno.test("decodeContenthash: Swarm contenthash → 32-byte hex reference", () => {
   const hash = "b".repeat(64); // 32 bytes
-  const contenthexHex = "e40101fa011b20" + hash;
-  const res = buildContenthashResponse(contenthexHex);
-  const decoded = decodeContenthash(res);
-  assertEquals("kind" in decoded, true);
-  if ("kind" in decoded) {
-    assertEquals(decoded.kind, "swarm");
-    assertEquals(decoded.ref, hash); // the 32-byte hex reference
-  }
+  const res = abiBytes("e40101fa011b20" + hash);
+  assertEquals(decodeContenthash(res), { status: "ref", kind: "swarm", ref: hash });
 });
 
-Deno.test("decodeContenthash: unknown codec returns state 'unsupported'", () => {
-  // e501 is an unknown/unhandled codec
-  const contenthexHex = "e50101701220" + "c".repeat(64);
-  const res = buildContenthashResponse(contenthexHex);
-  assertEquals(decodeContenthash(res), { state: "unsupported" });
-});
-
-Deno.test("decodeContenthash: IPNS codec (e50102) is unsupported", () => {
-  const contenthexHex = "e501020000" + "d".repeat(40);
-  const res = buildContenthashResponse(contenthexHex);
-  assertEquals(decodeContenthash(res), { state: "unsupported" });
+Deno.test("decodeContenthash: unknown codec → { status: 'unsupported' }", () => {
+  // e601 is multicodec 0xe6 (streamid) — not IPFS/IPNS/Swarm.
+  const res = abiBytes("e60101701220" + "c".repeat(64));
+  assertEquals(decodeContenthash(res), { status: "unsupported" });
 });

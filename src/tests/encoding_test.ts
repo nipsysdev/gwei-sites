@@ -1,42 +1,35 @@
 // Unit tests for encoding helpers (pure functions, no I/O).
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { base32, encodeString, hexToBytes, pad32, toHex } from "../encoding.ts";
+import { base32, base36, encodeString, hexToBytes, pad32, toHex } from "../encoding.ts";
 
-Deno.test("pad32: pads hex to 64 characters with leading zeros", () => {
+Deno.test("pad32: left-pads hex to one ABI word (64 chars)", () => {
   assertEquals(pad32("ff"), "00000000000000000000000000000000000000000000000000000000000000ff");
   assertEquals(pad32("20"), "0000000000000000000000000000000000000000000000000000000000000020");
-  assertEquals(pad32("a".repeat(64)), "a".repeat(64)); // already 64 chars
+  assertEquals(pad32("a".repeat(64)), "a".repeat(64));
 });
 
-Deno.test("toHex: converts Uint8Array to lowercase hex string", () => {
+Deno.test("toHex: converts Uint8Array to lowercase hex", () => {
   assertEquals(toHex(new Uint8Array([0, 255, 16])), "00ff10");
   assertEquals(toHex(new Uint8Array([])), "");
   assertEquals(toHex(new Uint8Array([0xab, 0xcd])), "abcd");
 });
 
-Deno.test("hexToBytes: converts hex string to Uint8Array", () => {
+Deno.test("hexToBytes: converts hex to Uint8Array and strips optional 0x prefix", () => {
   assertEquals(hexToBytes("00ff10"), new Uint8Array([0, 255, 16]));
   assertEquals(hexToBytes("abcd"), new Uint8Array([0xab, 0xcd]));
-  assertEquals(hexToBytes(""), new Uint8Array([]));
-});
-
-Deno.test("hexToBytes: strips 0x prefix if present", () => {
   assertEquals(hexToBytes("0xabcd"), new Uint8Array([0xab, 0xcd]));
+  assertEquals(hexToBytes(""), new Uint8Array([]));
 });
 
 Deno.test("toHex/hexToBytes: round-trip consistency", () => {
   const original = new Uint8Array([0, 1, 2, 255, 128, 64, 32]);
-  const hex = toHex(original);
-  const roundTrip = hexToBytes(hex);
-  assertEquals(roundTrip, original);
+  assertEquals(hexToBytes(toHex(original)), original);
 });
 
-Deno.test("encodeString: produces correct ABI encoding for a string argument", () => {
-  const result = encodeString("fb021939", "test");
-  // selector + offset(0x20) + length(4) + data("test" padded to 32)
+Deno.test("encodeString: ABI-encodes a string argument with the given selector", () => {
   assertEquals(
-    result,
+    encodeString("fb021939", "test"),
     "0xfb021939" +
       "0000000000000000000000000000000000000000000000000000000000000020" +
       "0000000000000000000000000000000000000000000000000000000000000004" +
@@ -45,28 +38,35 @@ Deno.test("encodeString: produces correct ABI encoding for a string argument", (
 });
 
 Deno.test("encodeString: handles empty string", () => {
-  const result = encodeString("abcdef", "");
   assertEquals(
-    result,
+    encodeString("abcdef", ""),
     "0xabcdef" +
       "0000000000000000000000000000000000000000000000000000000000000020" +
-      "0000000000000000000000000000000000000000000000000000000000000000" +
-      "",
+      "0000000000000000000000000000000000000000000000000000000000000000",
   );
 });
 
-Deno.test("base32: encodes bytes to RFC 4648 lowercase base32", () => {
-  // Empty input → empty output
-  assertEquals(base32(new Uint8Array([])), "");
-  // Known vectors: the multihash for CIDv1 uses base32 without padding
-  // 0x1220 (dag-pb + sha256) + 32 zero bytes
-  const input = new Uint8Array([0x12, 0x20, ...new Uint8Array(32)]);
-  const result = base32(input);
-  assertEquals(typeof result, "string");
-  assertEquals(result.length > 0, true);
-  // All chars should be from the base32 alphabet
-  const B32 = "abcdefghijklmnopqrstuvwxyz234567";
-  for (const c of result) {
-    assertEquals(B32.includes(c), true, `Unexpected char: ${c}`);
-  }
+Deno.test("base32: encodes the avatar CIDv1 to the known base32 string", () => {
+  // CIDv1 bytes for IPFS CID QmaeMmgMYE5Ro1ojpmNwyLBtBNT86ug52K4LLdoHDEM1XG
+  // (version 0x01 + dag-pb 0x70 + sha2-256 multihash 0x12 0x20 + 32-byte digest).
+  const cidV1 = hexToBytes(
+    "01701220b6d58b9d35febf61cef8db33f793df1c7b5ea5c0164b9a0ba436c381790b7c4b",
+  );
+  // base32 produces the CID body; the multibase `b` prefix is added by the codec.
+  assertEquals("b" + base32(cidV1), "bafybeifw2wfz2np6x5q456g3gp3zhxy4pnpklqawjonaxjbwyoaxsc34jm");
+});
+
+Deno.test("base36: encodes known small values", () => {
+  assertEquals(base36(new Uint8Array([])), "0");
+  assertEquals(base36(new Uint8Array([1])), "1");
+  assertEquals(base36(new Uint8Array([36])), "10"); // 36 = 1*36 + 0
+  assertEquals(base36(new Uint8Array([255])), "73"); // 255 = 7*36 + 3
+});
+
+Deno.test("base36: encodes the IPNS libp2p-key CIDv1 to the known base36 name", () => {
+  // libp2p-key CIDv1 bytes for the author's IPNS name.
+  const cidV1 = hexToBytes(
+    "01721220a1dc5d90d7272c0fd9150414f14c80c71de5d243c2f23165e2ddb495cbbcd05f",
+  );
+  assertEquals("k" + base36(cidV1), "k2k4r8ng8uzrtqb5ham8kao889m8qezu96z4w3lpinyqghum43veb6n3");
 });

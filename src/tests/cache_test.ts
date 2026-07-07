@@ -1,38 +1,49 @@
-// Unit tests for the in-process memory cache with TTL and stampede protection.
+// Unit tests for the in-process memory cache: TTL, LRU hard bound, and
+// single-flight stampede protection.
 
-import { assert, assertEquals } from "jsr:@std/assert@1";
+import { assertEquals, assertRejects } from "jsr:@std/assert@1";
+import { MEM_CACHE_MAX } from "../constants.ts";
 import { dedupe, memClear, memGet, memSet } from "../cache.ts";
 
-Deno.test("memGet/memSet: basic store and retrieve", () => {
+Deno.test("memGet/memSet: round-trips a value", () => {
   memClear();
   memSet("key1", { data: "hello" });
-  const val = memGet<{ data: string }>("key1");
-  assertEquals(val, { data: "hello" });
+  assertEquals(memGet<{ data: string }>("key1"), { data: "hello" });
 });
 
-Deno.test("memGet: returns undefined for missing key", () => {
+Deno.test("memGet: returns undefined for a missing key", () => {
   memClear();
   assertEquals(memGet("nonexistent"), undefined);
 });
 
 Deno.test("memGet: returns undefined after TTL expiry", async () => {
   memClear();
-  // Set with 10ms TTL
   memSet("shortlived", "value", 10);
   assertEquals(memGet("shortlived"), "value");
-  // Wait for expiry
   await new Promise((r) => setTimeout(r, 50));
   assertEquals(memGet("shortlived"), undefined);
 });
 
-Deno.test("memSet: uses default TTL when not specified", () => {
+Deno.test("memSet: uses the default TTL when none is given", () => {
   memClear();
   memSet("default", "val");
-  // Should still be present (default TTL is 30s)
   assertEquals(memGet("default"), "val");
 });
 
-Deno.test("dedupe: runs function once for concurrent calls with same key", async () => {
+Deno.test("memSet: evicts least-recently-used entries past the hard cap", () => {
+  memClear();
+  // Fill exactly to the cap with fresh entries.
+  for (let i = 0; i < MEM_CACHE_MAX; i++) memSet(`k${i}`, i, 60_000);
+  // Touch k0 so it is most-recently-used and survives eviction.
+  assertEquals(memGet("k0"), 0);
+  // One more insert pushes past the cap → k1 (the LRU) is evicted.
+  memSet("kExtra", 999, 60_000);
+  assertEquals(memGet("k0"), 0); // recently used → kept
+  assertEquals(memGet("k1"), undefined); // LRU → evicted
+  assertEquals(memGet("kExtra"), 999);
+});
+
+Deno.test("dedupe: runs the function once for concurrent calls on the same key", async () => {
   memClear();
   let callCount = 0;
   const expensive = async (): Promise<string> => {
@@ -41,7 +52,6 @@ Deno.test("dedupe: runs function once for concurrent calls with same key", async
     return "computed";
   };
 
-  // Fire 5 concurrent dedupe calls for the same key
   const results = await Promise.all([
     dedupe("shared", expensive),
     dedupe("shared", expensive),
@@ -50,40 +60,44 @@ Deno.test("dedupe: runs function once for concurrent calls with same key", async
     dedupe("shared", expensive),
   ]);
 
-  // All get the same result
   assertEquals(results, ["computed", "computed", "computed", "computed", "computed"]);
-  // The underlying function was only called once
   assertEquals(callCount, 1);
 });
 
-Deno.test("dedupe: allows new call after previous completes", async () => {
+Deno.test("dedupe: a rejecting function clears inflight and allows retry", async () => {
   memClear();
-  let callCount = 0;
-  const fn = (): Promise<number> => {
-    callCount++;
-    return Promise.resolve(callCount);
+  let calls = 0;
+  const fail = (): Promise<string> => {
+    calls++;
+    return Promise.reject(new Error("boom"));
   };
 
-  const r1 = await dedupe("key", fn);
-  assertEquals(r1, 1);
-  // After completion, the inflight entry is cleared
-  const r2 = await dedupe("key", fn);
-  assertEquals(r2, 2);
+  await assertRejects(() => dedupe("flaky", fail), Error, "boom");
+  assertEquals(calls, 1);
+  // inflight was cleared by `.finally`, so a second call runs again.
+  const ok = (): Promise<string> => {
+    calls++;
+    return Promise.resolve("ok");
+  };
+  assertEquals(await dedupe("flaky", ok), "ok");
+  assertEquals(calls, 2);
 });
 
 Deno.test("dedupe: separate keys run independently", async () => {
   memClear();
-  const results = await Promise.all([
-    dedupe("a", () => Promise.resolve("A")),
-    dedupe("b", () => Promise.resolve("B")),
-  ]);
-  assertEquals(results, ["A", "B"]);
+  assertEquals(
+    await Promise.all([
+      dedupe("a", () => Promise.resolve("A")),
+      dedupe("b", () => Promise.resolve("B")),
+    ]),
+    ["A", "B"],
+  );
 });
 
 Deno.test("memClear: empties the cache", () => {
   memSet("x", 1);
   memSet("y", 2);
-  assert(memGet("x") !== undefined);
+  assertEquals(memGet("x"), 1);
   memClear();
   assertEquals(memGet("x"), undefined);
   assertEquals(memGet("y"), undefined);

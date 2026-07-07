@@ -4,25 +4,25 @@ import { assertEquals } from "jsr:@std/assert@1";
 import { normalizeName, parseSubdomain } from "../name.ts";
 
 Deno.test("normalizeName: appends .gwei suffix", () => {
-  assertEquals(normalizeName("donnoh"), "donnoh.gwei");
+  assertEquals(normalizeName("xav"), "xav.gwei");
   assertEquals(normalizeName("z0r0z"), "z0r0z.gwei");
 });
 
 Deno.test("normalizeName: lowercases the label", () => {
-  assertEquals(normalizeName("Donnoh"), "donnoh.gwei");
-  assertEquals(normalizeName("DONNOH"), "donnoh.gwei");
+  assertEquals(normalizeName("Xav"), "xav.gwei");
+  assertEquals(normalizeName("XAV"), "xav.gwei");
   assertEquals(normalizeName("CamelCase"), "camelcase.gwei");
 });
 
 Deno.test("normalizeName: trims whitespace", () => {
-  assertEquals(normalizeName("  donnoh  "), "donnoh.gwei");
-  assertEquals(normalizeName("\tdonnoh\n"), "donnoh.gwei");
+  assertEquals(normalizeName("  xav  "), "xav.gwei");
+  assertEquals(normalizeName("\txav\n"), "xav.gwei");
 });
 
 Deno.test("parseSubdomain: extracts label from valid gwei host", () => {
-  assertEquals(parseSubdomain("donnoh.gwei.domains"), "donnoh");
-  assertEquals(parseSubdomain("z0r0z.gwei.domains"), "z0r0z");
-  assertEquals(parseSubdomain("foo.bar.gwei.domains"), "foo.bar");
+  assertEquals(parseSubdomain("xav.gwei.site"), "xav");
+  assertEquals(parseSubdomain("z0r0z.gwei.site"), "z0r0z");
+  assertEquals(parseSubdomain("foo.bar.gwei.site"), "foo.bar");
 });
 
 Deno.test("parseSubdomain: returns null for non-gwei host", () => {
@@ -31,15 +31,14 @@ Deno.test("parseSubdomain: returns null for non-gwei host", () => {
   assertEquals(parseSubdomain("google.com"), null);
 });
 
-Deno.test("parseSubdomain: returns null for apex domain", () => {
-  assertEquals(parseSubdomain("gwei.domains"), null);
-  // ".gwei.domains" has an empty label — treated as invalid → null
-  assertEquals(parseSubdomain(".gwei.domains"), null);
+Deno.test("parseSubdomain: returns null for apex domain and empty label", () => {
+  assertEquals(parseSubdomain("gwei.site"), null);
+  // ".gwei.site" has an empty label — treated as invalid → null
+  assertEquals(parseSubdomain(".gwei.site"), null);
 });
 
-Deno.test("parseSubdomain: handles uppercase host (caller lowercases first)", () => {
-  // parseSubdomain expects lowercased input; "DONNOH" would not match
-  assertEquals(parseSubdomain("DONNOH.GWEI.DOMAINS"), null);
-  // Correct usage: lowercase first
-  assertEquals(parseSubdomain("donnoh.gwei.domains".toLowerCase()), "donnoh");
+Deno.test("parseSubdomain: requires lowercased input (caller lowercases first)", () => {
+  // parseSubdomain expects lowercased input; uppercase would not match.
+  assertEquals(parseSubdomain("XAV.GWEI.SITE"), null);
+  assertEquals(parseSubdomain("XAV.GWEI.SITE".toLowerCase()), "xav");
 });

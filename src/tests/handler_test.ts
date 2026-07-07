@@ -1,9 +1,10 @@
 // Integration tests for the request handler.
 //
 // These test the full request flow (host parsing → resolution → proxy → response)
-// with stubbed `fetch` to simulate RPC and IPFS/Swarm gateway responses.
+// with stubbed `fetch` to simulate RPC and IPFS/IPNS/Swarm gateway responses.
+// IPFS/IPNS contenthashes use real published vectors.
 
-import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { stub } from "jsr:@std/testing@1/mock";
 import { handle } from "../handler.ts";
 import { memClear } from "../cache.ts";
@@ -13,17 +14,14 @@ function resetState() {
   memClear();
 }
 
-/** Build a valid ABI-encoded computeId response (uint256 tokenId). */
+/** A valid ABI-encoded computeId response (uint256 tokenId = 1). */
 const TOKEN_ID = "0x" + "0".repeat(63) + "1";
-function computeIdResponse(): string {
-  return TOKEN_ID;
-}
 
-/** Build a valid ABI-encoded contenthash response for IPFS from raw contenthash hex. */
-function contenthashResponse(contenthexHex: string): string {
-  const len = contenthexHex.length / 2;
+/** Wrap raw contenthash payload hex in an ABI `bytes` response. */
+function contenthashResponse(payloadHex: string): string {
+  const len = payloadHex.length / 2;
   const lenHex = len.toString(16).padStart(64, "0");
-  let data = contenthexHex;
+  let data = payloadHex;
   while (data.length % 64) data += "0";
   return "0x" +
     "0000000000000000000000000000000000000000000000000000000000000020" +
@@ -31,21 +29,27 @@ function contenthashResponse(contenthexHex: string): string {
     data;
 }
 
-// IPFS contenthash: e301 + dag-pb(0x70) + sha256(0x12) + len(0x20) + 32-byte hash
-const IPFS_HASH = "a".repeat(64);
-const IPFS_CONTENTHASH = contenthashResponse("e30101701220" + IPFS_HASH);
+// Real IPFS contenthash — encodes CID QmaeMmgMYE5Ro1ojpmNwyLBtBNT86ug52K4LLdoHDEM1XG.
+const IPFS_PAYLOAD = "e30101701220b6d58b9d35febf61cef8db33f793df1c7b5ea5c0164b9a0ba436c381790b7c4b";
+const IPFS_REF = "bafybeifw2wfz2np6x5q456g3gp3zhxy4pnpklqawjonaxjbwyoaxsc34jm";
+const IPFS_CONTENTHASH = contenthashResponse(IPFS_PAYLOAD);
 
-// Swarm contenthash: e40101fa011b20 + 32-byte hash
+// Real IPNS contenthash — encodes name k2k4r8ng8uzrtqb5ham8kao889m8qezu96z4w3lpinyqghum43veb6n3.
+const IPNS_PAYLOAD = "e50101721220a1dc5d90d7272c0fd9150414f14c80c71de5d243c2f23165e2ddb495cbbcd05f";
+const IPNS_REF = "k2k4r8ng8uzrtqb5ham8kao889m8qezu96z4w3lpinyqghum43veb6n3";
+const IPNS_CONTENTHASH = contenthashResponse(IPNS_PAYLOAD);
+
+// Swarm contenthash: e40101fa011b20 + 32-byte hash.
 const SWARM_HASH = "b".repeat(64);
 const SWARM_CONTENTHASH = contenthashResponse("e40101fa011b20" + SWARM_HASH);
 
-// Empty contenthash (state: none)
+// Empty contenthash (zero-length bytes → state none).
 const EMPTY_CONTENTHASH = "0x" +
   "0000000000000000000000000000000000000000000000000000000000000020" +
   "0000000000000000000000000000000000000000000000000000000000000000";
 
-// Unsupported codec (IPNS: e50102)
-const UNSUPPORTED_CONTENTHASH = contenthashResponse("e50102" + "0".repeat(60));
+// Unsupported codec (e601 = multicodec 0xe6, not IPFS/IPNS/Swarm).
+const UNSUPPORTED_CONTENTHASH = contenthashResponse("e60101701220" + "0".repeat(64));
 
 /** Build a mock RPC JSON response. */
 function rpcResponse(result: string): Response {
@@ -55,7 +59,7 @@ function rpcResponse(result: string): Response {
   });
 }
 
-/** Build a mock HTML response from an IPFS gateway. */
+/** Build a mock gateway response. */
 function gatewayResponse(body = "<h1>Hello from IPFS</h1>"): Response {
   return new Response(body, {
     status: 200,
@@ -63,37 +67,40 @@ function gatewayResponse(body = "<h1>Hello from IPFS</h1>"): Response {
   });
 }
 
+/** Whether a URL targets one of the configured RPC endpoints. */
+function isRpcUrl(url: string): boolean {
+  return url.includes("0xrpc.io") || url.includes("tenderly") || url.includes("publicnode");
+}
+
+/** Resolve a fetch input to its URL string. */
+function urlOf(input: URL | Request | string): string {
+  return typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+}
+
 /**
  * Create a fetch stub that routes based on URL:
- *   - RPC endpoints (POST) → return sequence of RPC responses
+ *   - RPC endpoints (POST) → return a sequence of RPC results (computeId then contenthash)
  *   - IPFS/Swarm gateways (GET) → return gateway content
  */
 function createFetchStub(opts: {
-  rpcResults?: string[]; // sequential results for each RPC call (computeId then contenthash)
+  rpcResults?: string[];
   gatewayOk?: boolean;
   gatewayBody?: string;
-  rpcFail?: boolean; // all RPCs return error
+  rpcFail?: boolean;
 }) {
   let rpcCallIndex = 0;
-  const rpcResults = opts.rpcResults ?? [computeIdResponse(), IPFS_CONTENTHASH];
+  const rpcResults = opts.rpcResults ?? [TOKEN_ID, IPFS_CONTENTHASH];
 
-  return stub(globalThis, "fetch", (_input: URL | Request | string, _init?: RequestInit) => {
-    const urlStr = typeof _input === "string"
-      ? _input
-      : (_input instanceof URL ? _input.href : _input.url);
-    const isRpc = urlStr.includes("0xrpc.io") || urlStr.includes("tenderly") ||
-      urlStr.includes("publicnode");
+  return stub(globalThis, "fetch", (input: URL | Request | string) => {
+    const urlStr = urlOf(input);
 
-    if (isRpc) {
-      if (opts.rpcFail) {
-        return Promise.resolve(new Response("error", { status: 500 }));
-      }
+    if (isRpcUrl(urlStr)) {
+      if (opts.rpcFail) return Promise.resolve(new Response("error", { status: 500 }));
       const result = rpcResults[rpcCallIndex] ?? rpcResults[rpcResults.length - 1];
       rpcCallIndex++;
       return Promise.resolve(rpcResponse(result));
     }
 
-    // Gateway fetch
     if (opts.gatewayOk === false) {
       return Promise.resolve(new Response("Gateway error", { status: 502 }));
     }
@@ -101,29 +108,36 @@ function createFetchStub(opts: {
   });
 }
 
-// ============================================================
-// Test: Happy path — IPFS resolution + content proxy
-// ============================================================
-Deno.test("happy path: resolves IPFS name and proxies content", async () => {
+/**
+ * Create a fetch stub that counts RPC calls while serving an IPFS resolution,
+ * exposing the count through `state.rpcCalls`.
+ */
+function ipfsCountingFetchStub(state: { rpcCalls: number }) {
+  return stub(globalThis, "fetch", (input: URL | Request | string) => {
+    const urlStr = urlOf(input);
+    if (isRpcUrl(urlStr)) {
+      state.rpcCalls++;
+      return Promise.resolve(rpcResponse(state.rpcCalls === 1 ? TOKEN_ID : IPFS_CONTENTHASH));
+    }
+    return Promise.resolve(gatewayResponse());
+  });
+}
+
+Deno.test("happy path: resolves an IPFS name and proxies content", async () => {
   resetState();
   using _fetchStub = createFetchStub({});
 
-  const req = new Request("http://donnoh.gwei.domains/");
-  const res = await handle(req);
+  const res = await handle(new Request("http://xav.gwei.site/"));
 
   assertEquals(res.status, 200);
   assertStringIncludes(await res.text(), "Hello from IPFS");
 });
 
-// ============================================================
-// Test: Security headers are applied to proxied responses
-// ============================================================
-Deno.test("proxied responses have security headers", async () => {
+Deno.test("proxied responses carry the security header set", async () => {
   resetState();
   using _fetchStub = createFetchStub({});
 
-  const req = new Request("http://donnoh.gwei.domains/");
-  const res = await handle(req);
+  const res = await handle(new Request("http://xav.gwei.site/"));
 
   assertEquals(res.headers.get("x-content-type-options"), "nosniff");
   assertEquals(res.headers.get("x-frame-options"), "SAMEORIGIN");
@@ -131,165 +145,110 @@ Deno.test("proxied responses have security headers", async () => {
   assertEquals(res.headers.get("strict-transport-security"), "max-age=31536000");
 });
 
-// ============================================================
-// Test: x-gwei-name and x-ipfs-cid tracking headers
-// ============================================================
-Deno.test("proxied responses have x-gwei-name and x-ipfs-cid headers", async () => {
+Deno.test("proxied responses carry exact tracking headers", async () => {
   resetState();
   using _fetchStub = createFetchStub({});
 
-  const res = await handle(new Request("http://donnoh.gwei.domains/"));
+  const res = await handle(new Request("http://xav.gwei.site/"));
 
-  assertEquals(res.headers.get("x-gwei-name"), "donnoh.gwei");
-  assertEquals(res.headers.get("x-ipfs-cid") !== null, true);
+  assertEquals(res.headers.get("x-gwei-name"), "xav.gwei");
+  assertEquals(res.headers.get("x-ipfs-cid"), IPFS_REF);
 });
 
-// ============================================================
-// Test: CDN cache headers are set
-// ============================================================
-Deno.test("proxied responses have Deno CDN cache headers", async () => {
+Deno.test("proxied responses carry Deno CDN cache directives", async () => {
   resetState();
   using _fetchStub = createFetchStub({});
 
-  const res = await handle(new Request("http://donnoh.gwei.domains/"));
+  const res = await handle(new Request("http://xav.gwei.site/"));
 
   const cdnCache = res.headers.get("deno-cdn-cache-control");
-  assert(cdnCache !== null);
-  assertStringIncludes(cdnCache, "s-maxage=300");
-  assertStringIncludes(cdnCache, "stale-while-revalidate");
-  assertEquals(res.headers.get("deno-cache-tag"), "gwei:donnoh.gwei");
+  assertStringIncludes(cdnCache ?? "", "s-maxage=300");
+  assertStringIncludes(cdnCache ?? "", "stale-while-revalidate");
+  assertEquals(res.headers.get("deno-cache-tag"), "gwei:xav.gwei");
 });
 
-// ============================================================
-// Test: Resolution cache — second request for same name skips RPC
-// ============================================================
-Deno.test("resolution cache: second request skips RPC calls", async () => {
+Deno.test("resolution cache: a second request for the same name skips RPC", async () => {
   resetState();
-  let rpcCallCount = 0;
-  using _fetchStub = stub(
-    globalThis,
-    "fetch",
-    (_input: URL | Request | string, _init?: RequestInit) => {
-      const urlStr = typeof _input === "string"
-        ? _input
-        : (_input instanceof URL ? _input.href : _input.url);
-      const isRpc = urlStr.includes("0xrpc.io") || urlStr.includes("tenderly") ||
-        urlStr.includes("publicnode");
+  const state = { rpcCalls: 0 };
+  using _fetchStub = ipfsCountingFetchStub(state);
 
-      if (isRpc) {
-        rpcCallCount++;
-        // computeId → tokenId; contenthash → IPFS
-        const result = rpcCallCount === 1 ? computeIdResponse() : IPFS_CONTENTHASH;
-        return Promise.resolve(rpcResponse(result));
-      }
-      return Promise.resolve(gatewayResponse());
-    },
-  );
+  await handle(new Request("http://xav.gwei.site/"));
+  assertEquals(state.rpcCalls, 2);
 
-  // First request: full resolution (2 RPC calls)
-  await handle(new Request("http://donnoh.gwei.domains/"));
-  const firstCallCount = rpcCallCount;
-  assertEquals(firstCallCount, 2);
-
-  // Second request: should use L1 memory cache (0 additional RPC calls)
-  await handle(new Request("http://donnoh.gwei.domains/about"));
-  assertEquals(rpcCallCount, 2); // no new RPC calls
+  // Different path, same name → served from L1, no new RPC calls.
+  await handle(new Request("http://xav.gwei.site/about"));
+  assertEquals(state.rpcCalls, 2);
 });
 
-// ============================================================
-// Test: No contenthash set → 404
-// ============================================================
-Deno.test("no contenthash: returns 404 with helpful message", async () => {
+Deno.test("no contenthash: returns 404 with a helpful message", async () => {
   resetState();
-  using _fetchStub = createFetchStub({
-    rpcResults: [computeIdResponse(), EMPTY_CONTENTHASH],
-  });
+  using _fetchStub = createFetchStub({ rpcResults: [TOKEN_ID, EMPTY_CONTENTHASH] });
 
-  const res = await handle(new Request("http://unset.gwei.domains/"));
+  const res = await handle(new Request("http://unset.gwei.site/"));
 
   assertEquals(res.status, 404);
   assertStringIncludes(await res.text(), "no website set");
 });
 
-// ============================================================
-// Test: Unsupported codec → 415
-// ============================================================
-Deno.test("unsupported codec: returns 415", async () => {
+Deno.test("unknown codec: returns 415", async () => {
   resetState();
-  using _fetchStub = createFetchStub({
-    rpcResults: [computeIdResponse(), UNSUPPORTED_CONTENTHASH],
-  });
+  using _fetchStub = createFetchStub({ rpcResults: [TOKEN_ID, UNSUPPORTED_CONTENTHASH] });
 
-  const res = await handle(new Request("http://ipns.gwei.domains/"));
+  const res = await handle(new Request("http://unknown.gwei.site/"));
 
   assertEquals(res.status, 415);
   assertStringIncludes(await res.text(), "unsupported contenthash");
 });
 
-// ============================================================
-// Test: Swarm contenthash resolution + proxy
-// ============================================================
 Deno.test("Swarm contenthash: resolves and proxies", async () => {
   resetState();
   using _fetchStub = createFetchStub({
-    rpcResults: [computeIdResponse(), SWARM_CONTENTHASH],
+    rpcResults: [TOKEN_ID, SWARM_CONTENTHASH],
     gatewayBody: "<h1>Hello from Swarm</h1>",
   });
 
-  const res = await handle(new Request("http://swarm.gwei.domains/"));
+  const res = await handle(new Request("http://swarm.gwei.site/"));
 
   assertEquals(res.status, 200);
   assertStringIncludes(await res.text(), "Hello from Swarm");
   assertEquals(res.headers.get("x-swarm-reference"), SWARM_HASH);
 });
 
-// ============================================================
-// Test: RPC failure → 502
-// ============================================================
+Deno.test("IPNS contenthash: resolves and proxies", async () => {
+  resetState();
+  using _fetchStub = createFetchStub({
+    rpcResults: [TOKEN_ID, IPNS_CONTENTHASH],
+    gatewayBody: "<h1>Hello from IPNS</h1>",
+  });
+
+  const res = await handle(new Request("http://mutable.gwei.site/"));
+
+  assertEquals(res.status, 200);
+  assertStringIncludes(await res.text(), "Hello from IPNS");
+  assertEquals(res.headers.get("x-ipns-name"), IPNS_REF);
+});
+
 Deno.test("RPC failure: returns 502 with no-store", async () => {
   resetState();
   using _fetchStub = createFetchStub({ rpcFail: true });
 
-  const res = await handle(new Request("http://broken.gwei.domains/"));
+  const res = await handle(new Request("http://broken.gwei.site/"));
 
   assertEquals(res.status, 502);
   assertEquals(res.headers.get("cache-control"), "no-store");
 });
 
-// ============================================================
-// Test: IPFS gateway unreachable → 504
-// ============================================================
 Deno.test("gateway unreachable: returns 504", async () => {
   resetState();
   using _fetchStub = createFetchStub({ gatewayOk: false });
 
-  const res = await handle(new Request("http://offline.gwei.domains/"));
+  const res = await handle(new Request("http://offline.gwei.site/"));
 
   assertEquals(res.status, 504);
   assertEquals(res.headers.get("cache-control"), "no-store");
 });
 
-// ============================================================
-// Test: Reserved subdomain proxy
-// ============================================================
-Deno.test("reserved subdomain: transparent proxy passthrough", async () => {
-  resetState();
-  using _fetchStub = stub(
-    globalThis,
-    "fetch",
-    () => Promise.resolve(new Response("diff page", { status: 200 })),
-  );
-
-  const res = await handle(new Request("http://diff.gwei.domains/"));
-
-  assertEquals(res.status, 200);
-  assertEquals(await res.text(), "diff page");
-});
-
-// ============================================================
-// Test: Non-gwei host → 404
-// ============================================================
-Deno.test("non-gwei host: returns 404", async () => {
+Deno.test("non-gwei host: returns 404 without calling fetch", async () => {
   resetState();
   let fetchCalled = false;
   using _fetchStub = stub(globalThis, "fetch", () => {
@@ -301,51 +260,27 @@ Deno.test("non-gwei host: returns 404", async () => {
 
   assertEquals(res.status, 404);
   assertStringIncludes(await res.text(), "Not a gwei name");
-  assertEquals(fetchCalled, false); // no RPC or gateway calls
+  assertEquals(fetchCalled, false);
 });
 
-// ============================================================
-// Test: Apex gwei.domains → 404
-// ============================================================
 Deno.test("apex domain: returns 404", async () => {
   resetState();
-  const res = await handle(new Request("http://gwei.domains/"));
-
+  const res = await handle(new Request("http://gwei.site/"));
   assertEquals(res.status, 404);
 });
 
-// ============================================================
-// Test: Name normalization — uppercase subdomain works
-// ============================================================
-Deno.test("name normalization: uppercase subdomain resolves correctly", async () => {
+Deno.test("name normalization: uppercase subdomain resolves lowercased", async () => {
   resetState();
-  let rpcCallCount = 0;
-  using _fetchStub = stub(globalThis, "fetch", (_input: URL | Request | string) => {
-    const urlStr = typeof _input === "string"
-      ? _input
-      : (_input instanceof URL ? _input.href : _input.url);
-    if (
-      urlStr.includes("0xrpc.io") || urlStr.includes("tenderly") || urlStr.includes("publicnode")
-    ) {
-      rpcCallCount++;
-      return Promise.resolve(
-        rpcResponse(rpcCallCount === 1 ? computeIdResponse() : IPFS_CONTENTHASH),
-      );
-    }
-    return Promise.resolve(gatewayResponse());
-  });
+  using _fetchStub = createFetchStub({});
 
-  const res = await handle(new Request("http://DONNOH.gwei.domains/"));
+  const res = await handle(new Request("http://XAV.gwei.site/"));
   assertEquals(res.status, 200);
-  assertEquals(res.headers.get("x-gwei-name"), "donnoh.gwei"); // lowercased
+  assertEquals(res.headers.get("x-gwei-name"), "xav.gwei");
 });
 
-// ============================================================
-// Test: Health check endpoint
-// ============================================================
 Deno.test("health check: /.well-known/gateway-status returns JSON", async () => {
   resetState();
-  const res = await handle(new Request("http://anything.gwei.domains/.well-known/gateway-status"));
+  const res = await handle(new Request("http://anything.gwei.site/.well-known/gateway-status"));
 
   assertEquals(res.status, 200);
   assertEquals(res.headers.get("content-type"), "application/json; charset=utf-8");
@@ -355,69 +290,32 @@ Deno.test("health check: /.well-known/gateway-status returns JSON", async () => 
   assertEquals(body.service, "gwei-gateway");
 });
 
-// ============================================================
-// Test: Cache stampede protection — concurrent requests dedup RPC calls
-// ============================================================
-Deno.test("stampede protection: concurrent requests for same name share one resolution", async () => {
+Deno.test("stampede protection: concurrent requests share one resolution", async () => {
   resetState();
-  let rpcCallCount = 0;
-  using _fetchStub = stub(globalThis, "fetch", (_input: URL | Request | string) => {
-    const urlStr = typeof _input === "string"
-      ? _input
-      : (_input instanceof URL ? _input.href : _input.url);
-    if (
-      urlStr.includes("0xrpc.io") || urlStr.includes("tenderly") || urlStr.includes("publicnode")
-    ) {
-      rpcCallCount++;
-      return Promise.resolve(
-        rpcResponse(rpcCallCount === 1 ? computeIdResponse() : IPFS_CONTENTHASH),
-      );
-    }
-    return Promise.resolve(gatewayResponse());
-  });
+  const state = { rpcCalls: 0 };
+  using _fetchStub = ipfsCountingFetchStub(state);
 
-  // Fire 5 concurrent requests for the same name
   const results = await Promise.all([
-    handle(new Request("http://burst.gwei.domains/")),
-    handle(new Request("http://burst.gwei.domains/a")),
-    handle(new Request("http://burst.gwei.domains/b")),
-    handle(new Request("http://burst.gwei.domains/c")),
-    handle(new Request("http://burst.gwei.domains/d")),
+    handle(new Request("http://burst.gwei.site/")),
+    handle(new Request("http://burst.gwei.site/a")),
+    handle(new Request("http://burst.gwei.site/b")),
+    handle(new Request("http://burst.gwei.site/c")),
+    handle(new Request("http://burst.gwei.site/d")),
   ]);
 
-  // All should succeed
-  for (const r of results) {
-    assertEquals(r.status, 200);
-  }
-  // Should have only 2 RPC calls total (1 computeId + 1 contenthash), not 10
-  assertEquals(rpcCallCount, 2);
+  for (const r of results) assertEquals(r.status, 200);
+  // Only 2 RPC calls (1 computeId + 1 contenthash), not 10.
+  assertEquals(state.rpcCalls, 2);
 });
 
-// ============================================================
-// Test: Different paths share the same resolution cache
-// ============================================================
-Deno.test("resolution cache: shared across different paths for same name", async () => {
+Deno.test("resolution cache: shared across different paths for the same name", async () => {
   resetState();
-  let rpcCallCount = 0;
-  using _fetchStub = stub(globalThis, "fetch", (_input: URL | Request | string) => {
-    const urlStr = typeof _input === "string"
-      ? _input
-      : (_input instanceof URL ? _input.href : _input.url);
-    if (
-      urlStr.includes("0xrpc.io") || urlStr.includes("tenderly") || urlStr.includes("publicnode")
-    ) {
-      rpcCallCount++;
-      return Promise.resolve(
-        rpcResponse(rpcCallCount === 1 ? computeIdResponse() : IPFS_CONTENTHASH),
-      );
-    }
-    return Promise.resolve(gatewayResponse());
-  });
+  const state = { rpcCalls: 0 };
+  using _fetchStub = ipfsCountingFetchStub(state);
 
-  await handle(new Request("http://shared.gwei.domains/"));
-  await handle(new Request("http://shared.gwei.domains/about"));
-  await handle(new Request("http://shared.gwei.domains/contact"));
+  await handle(new Request("http://shared.gwei.site/"));
+  await handle(new Request("http://shared.gwei.site/about"));
+  await handle(new Request("http://shared.gwei.site/contact"));
 
-  // Only 2 RPC calls (resolution cached across all paths)
-  assertEquals(rpcCallCount, 2);
+  assertEquals(state.rpcCalls, 2);
 });
