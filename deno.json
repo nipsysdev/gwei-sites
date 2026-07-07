@@ -31,6 +31,10 @@
   },
   "exclude": ["cov/"],
   "deploy": {
-    "entrypoint": "main.ts"
+    "org": "gwei-site",
+    "app": "gwei-site"
   }
 }
+
+
+
