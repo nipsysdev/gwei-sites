@@ -1,7 +1,7 @@
 // HTML error/info page generation with consistent dark-themed styling
 // and security headers.
 
-import { harden } from "./headers.ts";
+import { escapeHtml, harden } from "./headers.ts";
 
 const PAGE_STYLES =
   "body{background:#0a0a0a;color:#e8e8e0;font-family:Helvetica,Arial,sans-serif;" +
@@ -16,7 +16,7 @@ const PAGE_HEAD =
 /**
  * Build a styled HTML response page with security headers.
  *
- * @param title  Page `<title>` text (also used in templated head).
+ * @param title  Page `<title>` text (HTML-escaped before templating).
  * @param body   Raw HTML body content.
  * @param status HTTP status code.
  * @param cache  Cache-Control header value (default: `public, max-age=60`).
@@ -30,6 +30,6 @@ export function page(
   const headers = harden(
     new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": cache }),
   );
-  const html = PAGE_HEAD.replace("%TITLE%", title) + body;
+  const html = PAGE_HEAD.replace("%TITLE%", escapeHtml(title)) + body;
   return new Response(html, { status, headers });
 }

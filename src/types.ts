@@ -1,27 +1,31 @@
 // Shared type definitions for the gwei gateway.
 
 /** The storage protocol resolved from an on-chain contenthash. */
-export type Protocol = "ipfs" | "swarm";
+export type Protocol = "ipfs" | "ipns" | "swarm";
 
-/** A successful resolution pointing to storage content. */
+/**
+ * Resolution outcomes, discriminated by a single `status` field so handlers
+ * can branch exhaustively with one check (no probing for `kind`/`state`).
+ */
 export interface ResolvedRef {
+  status: "ref";
   kind: Protocol;
   ref: string;
 }
 
 /** The name has no contenthash set on-chain. */
 export interface ResolvedNone {
-  state: "none";
+  status: "none";
 }
 
-/** The contenthash codec is not IPFS or Swarm. */
+/** The contenthash codec is not IPFS, IPNS, or Swarm. */
 export interface ResolvedUnsupported {
-  state: "unsupported";
+  status: "unsupported";
 }
 
 /** All RPC endpoints failed during resolution. */
 export interface ResolvedError {
-  error: "rpc";
+  status: "error";
 }
 
 /** The discriminated union returned by the resolver. */
@@ -31,6 +35,12 @@ export type ResolutionResult =
   | ResolvedUnsupported
   | ResolvedError;
 
+/** Codec decode result — resolution minus the RPC-error variant. */
+export type DecodedContenthash =
+  | ResolvedRef
+  | ResolvedNone
+  | ResolvedUnsupported;
+
 /** Per-protocol gateway configuration. */
 export interface ProtocolConfig {
   gateways: string[];
@@ -38,18 +48,8 @@ export interface ProtocolConfig {
   header: string;
 }
 
-/** A cached resolution entry with expiry timestamp. */
+/** A cached resolution entry with expiry timestamp (epoch ms). */
 export interface CacheEntry<T> {
   value: T;
   expires: number;
-}
-
-/** Type guard: does the resolution point to fetchable content? */
-export function isResolvedRef(r: ResolutionResult): r is ResolvedRef {
-  return (r as ResolvedRef).kind !== undefined;
-}
-
-/** Type guard: did the RPC layer fail? */
-export function isResolvedError(r: ResolutionResult): r is ResolvedError {
-  return (r as ResolvedError).error !== undefined;
 }

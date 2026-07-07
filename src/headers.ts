@@ -1,12 +1,21 @@
 // Security headers applied to all proxied responses and error pages.
 
-/** Fixed set of security headers layered onto every response we generate. */
+/**
+ * Fixed set of security headers layered onto every response we generate.
+ *
+ * Note on HSTS: `strict-transport-security` deliberately omits
+ * `includeSubDomains`. Each `*.gwei.site` subdomain is an independent site, so
+ * pinning the apex policy onto every subdomain would force HSTS onto names
+ * whose owners did not opt in, and would also pin the bare apex `gwei.site`,
+ * which is outside this wildcard gateway's scope. Each subdomain establishes
+ * its own HSTS via this header on first response.
+ */
 export const SECURITY_HEADERS: Record<string, string> = {
   "x-content-type-options": "nosniff",
   "x-frame-options": "SAMEORIGIN",
   "content-security-policy": "frame-ancestors 'self';",
   "referrer-policy": "strict-origin-when-cross-origin",
-  "permissions-policy": "geolocation=(), microphone=(), camera=(), payment=(), usb=(), battery=()",
+  "permissions-policy": "geolocation=(), microphone=(), camera=(), payment=(), usb=()",
   "strict-transport-security": "max-age=31536000",
   "cross-origin-resource-policy": "cross-origin",
 };

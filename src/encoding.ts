@@ -1,6 +1,12 @@
-// Hex, base32, and ABI encoding helpers — all pure functions with no I/O.
+// Hex, base32, base36, and ABI encoding helpers — all pure functions with no I/O.
 
 import { B32 } from "./constants.ts";
+
+/** RFC 4648 base32 alphabet (lowercase, no padding). */
+// B32 imported from constants.
+
+/** Base36 alphabet (lowercase alphanumeric) for multibase `k` prefix encoding. */
+const B36 = "0123456789abcdefghijklmnopqrstuvwxyz";
 
 /** Left-pad a hex string to 64 characters (32 bytes / one ABI word). */
 export function pad32(h: string): string {
@@ -56,5 +62,27 @@ export function base32(bytes: Uint8Array): string {
     }
   }
   if (bits > 0) out += B32[(val << (5 - bits)) & 31];
+  return out;
+}
+
+/**
+ * Base36-encode a Uint8Array using the lowercase alphanumeric alphabet.
+ * Used to convert IPNS CIDv1 bytes to the multibase `k` string (the standard
+ * representation for libp2p-key CIDs in IPNS gateway URLs).
+ *
+ * Unlike base32/base64, base36 is not a power of 2, so this requires BigInt
+ * arithmetic: convert bytes to a big-endian BigInt, then repeatedly divide by 36.
+ */
+export function base36(bytes: Uint8Array): string {
+  let num = 0n;
+  for (const b of bytes) {
+    num = (num << 8n) | BigInt(b);
+  }
+  if (num === 0n) return "0";
+  let out = "";
+  while (num > 0n) {
+    out = B36[Number(num % 36n)] + out;
+    num /= 36n;
+  }
   return out;
 }

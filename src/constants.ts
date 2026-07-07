@@ -29,41 +29,45 @@ import type { ProtocolConfig } from "./types.ts";
 
 export const PROTOCOLS: Record<string, ProtocolConfig> = {
   ipfs: { gateways: IPFS_GATEWAYS, prefix: "/ipfs/", header: "x-ipfs-cid" },
+  ipns: { gateways: IPFS_GATEWAYS, prefix: "/ipns/", header: "x-ipns-name" },
   swarm: { gateways: SWARM_GATEWAYS, prefix: "/bzz/", header: "x-swarm-reference" },
 };
 
-// Reserved subdomains that proxy to external services (no caching, no hardening).
-export const RESERVED: Record<string, string> = {
-  diff: "https://gwei-diff-production.up.railway.app",
-};
+// Resolution cache TTLs (milliseconds) — passed directly to memSet().
+export const RESOLVE_TTL = 300_000; // positive: name resolved to a content ref
+export const RESOLVE_NEG_TTL = 60_000; // negative: no contenthash / unsupported codec
+export const RESOLVE_ERR_TTL = 5_000; // transient: all RPCs failed (short, to retry soon)
 
-// Cache TTLs (seconds).
-export const RESOLVE_TTL = 300;
-export const RESOLVE_NEG_TTL = 60;
+// Proxied-content cache TTL. NOTE: units are SECONDS — this value is interpolated
+// into HTTP Cache-Control / Deno-CDN-Cache-Control directives, never passed to memSet.
 export const CONTENT_TTL = 300;
 
-// In-process memory cache TTL (milliseconds) — shorter than edge cache.
+// In-process memory cache default TTL (milliseconds) — shorter than edge cache.
 export const MEM_CACHE_TTL = 30_000;
 
 // Per-RPC timeout (milliseconds).
 export const RPC_TIMEOUT = 5_000;
 
-// Per-gateway timeout (milliseconds) for IPFS/Swarm fetches.
-export const GATEWAY_TIMEOUT = 10_000;
+// Per-gateway timeout (milliseconds) for IPFS/Swarm fetches, applied to the
+// headers phase only — the body streams without a hard cutoff once headers
+// arrive. IPFS cold content can take 20+ seconds to fetch from the network.
+export const GATEWAY_TIMEOUT = 120_000;
 
 // Function selectors (4-byte hex, no 0x prefix).
 export const SEL_COMPUTEID = "fb021939";
 export const SEL_CONTENTHASH = "cb323d76";
 
-// Contenthash codec prefixes (hex, no 0x prefix).
+// Contenthash codec prefixes (hex, no 0x prefix). These are varint-encoded
+// multicodec prefixes from EIP-1577.
 export const CODEC_IPFS = "e301";
 export const CODEC_SWARM = "e40101fa011b20";
+export const CODEC_IPNS = "e501";
 
 // RFC 4648 base32 alphabet (lowercase, no padding).
 export const B32 = "abcdefghijklmnopqrstuvwxyz234567";
 
 // The apex domain this gateway serves.
-export const APEX_DOMAIN = ".gwei.domains";
+export const APEX_DOMAIN = ".gwei.site";
 
-// Per-request L1 memory cache size limit.
+// Per-isolate L1 memory cache size limit (hard bound; LRU-evicted when exceeded).
 export const MEM_CACHE_MAX = 500;

@@ -1,7 +1,13 @@
-// Name resolution: on-chain contenthash lookup with in-process memory caching
-// and single-flight stampede protection.
+// Name resolution: on-chain contenthash lookup with in-process memory caching,
+// single-flight stampede protection, and negative caching of failures.
 
-import { RESOLVE_NEG_TTL, RESOLVE_TTL, SEL_COMPUTEID, SEL_CONTENTHASH } from "./constants.ts";
+import {
+  RESOLVE_ERR_TTL,
+  RESOLVE_NEG_TTL,
+  RESOLVE_TTL,
+  SEL_COMPUTEID,
+  SEL_CONTENTHASH,
+} from "./constants.ts";
 import { dedupe, memGet, memSet } from "./cache.ts";
 import { decodeContenthash } from "./codec.ts";
 import { encodeString } from "./encoding.ts";
@@ -20,12 +26,17 @@ const CACHE_PREFIX = "resolve:";
  *   2. If miss, use single-flight dedup to prevent stampede.
  *   3. `eth_call computeId(name)` → tokenId.
  *   4. `eth_call contenthash(tokenId)` → ABI-encoded bytes.
- *   5. Decode codec (IPFS / Swarm / none / unsupported).
- *   6. Cache result (300s positive, 60s negative).
+ *   5. Decode codec (IPFS / IPNS / Swarm / none / unsupported).
+ *   6. Cache result with a TTL keyed to its outcome.
  *
- * @param name   Full gwei name, e.g. `"donnoh.gwei"` (must already be normalized).
+ * Every outcome is cached so bursts never amplify RPC load:
+ *   - ref (resolved)     → RESOLVE_TTL     (300s)
+ *   - none/unsupported   → RESOLVE_NEG_TTL (60s)
+ *   - RPC error          → RESOLVE_ERR_TTL (5s, short so transient blips retry fast)
+ *
+ * @param name   Full gwei name, e.g. `"xav.gwei"` (must already be normalized).
  * @param rpcs   Ordered RPC endpoint list.
- * @returns      Resolution result (discriminated union).
+ * @returns      Resolution result (discriminated union on `status`).
  */
 export function resolveName(name: string, rpcs: string[]): Promise<ResolutionResult> {
   const key = CACHE_PREFIX + name;
@@ -46,35 +57,24 @@ export function resolveName(name: string, rpcs: string[]): Promise<ResolutionRes
     const idRes = await ethCall(encodeString(SEL_COMPUTEID, name), rpcs);
     if (!idRes) {
       console.error(`resolveName(${name}): computeId RPC failed`);
-      return { error: "rpc" };
+      const err: ResolutionResult = { status: "error" };
+      memSet(key, err, RESOLVE_ERR_TTL);
+      return err;
     }
 
     // Step 2: contenthash(uint256) → bytes
     const chRes = await ethCall("0x" + SEL_CONTENTHASH + idRes.slice(2), rpcs);
     if (!chRes) {
       console.error(`resolveName(${name}): contenthash RPC failed`);
-      return { error: "rpc" };
+      const err: ResolutionResult = { status: "error" };
+      memSet(key, err, RESOLVE_ERR_TTL);
+      return err;
     }
 
-    // Step 3: decode the contenthash codec.
+    // Step 3: decode + cache. Positive results cache longer than negative ones.
     const decoded = decodeContenthash(chRes);
-
-    // Step 4: determine result + TTL, cache it.
-    let result: ResolutionResult;
-    let ttl: number;
-
-    if ("kind" in decoded) {
-      result = decoded;
-      ttl = RESOLVE_TTL * 1000;
-    } else if (decoded.state === "none") {
-      result = { state: "none" };
-      ttl = RESOLVE_NEG_TTL * 1000;
-    } else {
-      result = { state: "unsupported" };
-      ttl = RESOLVE_NEG_TTL * 1000;
-    }
-
-    memSet(key, result, ttl);
-    return result;
+    const ttl = decoded.status === "ref" ? RESOLVE_TTL : RESOLVE_NEG_TTL;
+    memSet(key, decoded, ttl);
+    return decoded;
   });
 }
