@@ -1,11 +1,4 @@
-// gwei.site gateway — Deno Deploy entry point.
-//
-// The request handling logic lives in `src/handler.ts` so it can be tested
-// in isolation. This file just wires it up to Deno.serve() with a top-level
-// error handler.
-
-import { handle } from "./src/handler.ts";
-import { page } from "./src/pages.ts";
+import { handle, page } from "./src/handler.ts";
 
 Deno.serve({
   onError(error) {
