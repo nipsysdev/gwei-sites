@@ -1,165 +1,103 @@
-# gwei-gateway (Deno Deploy)
+# gwei.site gateway
 
-A Deno Deploy edge function that turns `<name>.gwei.domains` into the website stored at that name's
-on-chain `contenthash`. This is the Deno Deploy port of the [Cloudflare Worker gateway](../gateway/)
-in the gwei-names monorepo.
+An edge gateway that serves websites from on-chain contenthashes. Given `<name>.gwei.site`, it
+resolves the name on Ethereum and proxies its IPFS, IPNS, or Swarm content from dedicated and public
+gateways.
+
+Built for [Deno Deploy](https://deno.com/deploy). Zero runtime dependencies. Strict TypeScript. 104
+tests.
+
+A Deno Deploy rewrite of the [gwei.domains](https://gwei.domains) gateway (originally a Cloudflare
+Worker in the [gwei-names](https://github.com/lucadonnoh/gwei-names) monorepo).
+
+## Infrastructure
+
+The gateway is built on [4EVERLAND](https://4everland.org) for three services:
+
+- **RPC** — Ethereum JSON-RPC for on-chain name resolution. A free key is primary; a paid key
+  absorbs rate-limit overflow. Public RPCs are last-resort fallback.
+- **Dedicated gateway** — an IPFS content gateway with no rate limits, used as the primary source
+  for proxied content. Public IPFS gateways serve as fallback.
+- **Pinning** — resolved CIDs are proactively pinned to 4EVERLAND's nodes, so content is cached
+  close to the dedicated gateway for faster retrieval.
+
+All three are optional — without configuration the gateway degrades gracefully to public endpoints.
+
+## Quick start
+
+```sh
+deno task dev
+deno test
+```
+
+```sh
+curl -H "Host: xav.gwei.site" http://localhost:8000/
+```
 
 ## How it works
 
 ```
-donnoh.gwei.domains/about
+xav.gwei.site/en/whoami
   │
-  ├─ Parse Host → subdomain "donnoh"
-  ├─ Normalize → name "donnoh.gwei"
-  ├─ Resolve (on-chain):
-  │    eth_call computeId("donnoh.gwei") → tokenId
-  │    eth_call contenthash(tokenId)     → ABI-encoded bytes
-  │    Decode codec: e301 (IPFS) | e40101fa011b20 (Swarm)
-  │
-  ├─ Proxy content (racing gateways in parallel via Promise.any):
-  │    IPFS: ipfs.io  ‖  dweb.link
-  │    Swarm: gateway.ethswarm.org  ‖  download.gateway.ethswarm.org
-  │
-  └─ Response: streamed content + security headers + CDN cache directives
+  ├─ Resolve on-chain: eth_call → contenthash → IPFS / IPNS / Swarm ref
+  ├─ For IPNS: resolve to current CID via routing V1 (gateway race fallback)
+  ├─ Proxy content: dedicated gateway → public gateways (first 2xx wins)
+  └─ Stream + security headers + browser/edge cache directives
 ```
 
-## Improvements over the Cloudflare Worker
+Three storage backends are supported — IPFS (CIDv1), IPNS (libp2p-key), and Swarm (bzz).
 
-| Feature            | CF Worker                    | This port                                           |
-| ------------------ | ---------------------------- | --------------------------------------------------- |
-| RPC timeout        | None (can hang 30s+)         | `AbortSignal.timeout(5000)` per RPC                 |
-| Name normalization | Raw `sub + '.gwei'`          | `normalizeName()` — lowercases + trims              |
-| Gateway fetch      | Sequential failover          | `Promise.any()` — races in parallel                 |
-| Cache stampede     | None                         | Single-flight dedup via `dedupe()`                  |
-| Error logging      | Silent `catch (_) {}`        | `console.error()` for all failures                  |
-| Codec constants    | Magic hex strings            | `CODEC_IPFS`, `CODEC_SWARM` named constants         |
-| Health check       | None                         | `/.well-known/gateway-status`                       |
-| CDN caching        | Cache API (`caches.default`) | `Deno-CDN-Cache-Control` + `stale-while-revalidate` |
-| Type safety        | Plain JS                     | Full TypeScript with strict mode                    |
-| Module structure   | Single 224-line file         | Modular TypeScript (13 modules)                     |
+## Configuration
 
-## Quick start
+Four optional environment variables for 4EVERLAND infrastructure. Without them, the gateway uses
+public endpoints only.
 
-### Prerequisites
+| Variable            | Purpose                                                          |
+| ------------------- | ---------------------------------------------------------------- |
+| `RPC_KEY`           | 4EVERLAND RPC key (free tier, primary)                           |
+| `RPC_KEY_FALLBACK`  | Paid 4EVERLAND RPC key (used when the free tier is rate-limited) |
+| `DEDICATED_GATEWAY` | 4EVERLAND dedicated gateway hostname (primary for content)       |
+| `PIN_TOKEN`         | 4EVERLAND pin API token (proactive IPFS pinning)                 |
 
-- [Deno 2.0+](https://deno.com) installed
-- A [Deno Deploy](https://deno.com/deploy) account (Pro plan recommended for wildcard domains)
-
-### Local development
-
-```sh
-# Install dependencies (cached automatically)
-deno task dev
-
-# Server starts at http://localhost:8000
-# Test it:
-curl -H "Host: donnoh.gwei.domains" http://localhost:8000/
-```
-
-### Run tests
-
-```sh
-deno test --allow-net --allow-env
-```
-
-### Type check, lint, format
-
-```sh
-deno check main.ts
-deno lint
-deno fmt
-```
-
-## Deployment to Deno Deploy
-
-### 1. Create a project
-
-In the [Deno Deploy dashboard](https://console.deno.com), create a new project named `gwei-gateway`
-(or whatever you prefer). Link it to your GitHub repo, or use the CLI.
-
-### 2. Set environment variables
-
-In the project settings → Environment Variables:
-
-| Variable  | Required    | Description                                                                                                     |
-| --------- | ----------- | --------------------------------------------------------------------------------------------------------------- |
-| `RPC_URL` | Recommended | Dedicated Ethereum RPC endpoint (Alchemy, Infura, etc.). Prepended to the public RPC pool to avoid rate limits. |
-
-### 3. Deploy
-
-**Via GitHub integration** (recommended):
-
-1. Push this repo to GitHub
-2. Connect it in the Deno Deploy dashboard
-3. Set the entrypoint to `main.ts`
-4. Pushes to `main` auto-deploy to production
-
-**Via CLI**:
-
-```sh
-deno install -gArf jsr:@deno/deployctl
-deployctl deploy --project=gwei-gateway --entrypoint=main.ts
-```
-
-### 4. Configure DNS
-
-For wildcard `*.gwei.domains` routing, add DNS records pointing to Deno Deploy:
-
-```
-# ANAME/ALIAS method (preferred for wildcard)
-*.gwei.domains           ANAME   ingress.denohost.net
-_acme-challenge.gwei.domains  CNAME   _acme-challenge.gwei.domains.deno-challenge.com
-```
-
-Deno Deploy auto-provisions Let's Encrypt TLS certificates for wildcard domains (Pro plan required).
-
-Add the custom domain `*.gwei.domains` in the project settings → Domains.
+Set these in Deno Deploy → Settings → Environment Variables.
 
 ## Architecture
 
 ```
-main.ts                     Entry point — Deno.serve() + top-level error handler
+main.ts            Deno.serve entry point
 src/
-├── handler.ts              Request routing: host parsing, reserved proxy, resolution dispatch
-├── constants.ts            Contract address, RPCs, gateways, selectors, TTLs
-├── types.ts                Shared TypeScript interfaces + type guards
-├── encoding.ts             ABI encoding + hex/base32 helpers (pure functions)
-├── cache.ts                In-process memory cache with TTL + stampede protection
-├── rpc.ts                  eth_call with AbortSignal timeout + multi-RPC failover
-├── codec.ts                Contenthash codec decoding (IPFS, Swarm)
-├── resolver.ts             Name resolution: RPC + cache + decode orchestration
-├── proxy.ts                IPFS/Swarm content proxy with Promise.any racing
-├── headers.ts              Security headers + HTML escaping
-├── pages.ts                HTML error/info page generation
-├── name.ts                 Subdomain parsing + name normalization
-└── tests/                  Unit + integration tests (45 tests)
+  config.ts        Environment-derived config
+  constants.ts     Static data (addresses, timeouts, TTLs, gateways)
+  handler.ts       Request routing, response hardening, error pages
+  resolver.ts      On-chain resolution + contenthash decode
+  proxy.ts         Content proxy + IPNS→CID resolution
+  rpc.ts           eth_call client with sequential failover
+  cache.ts         Two-tier cache (L1 Map + L2 KV) with SWR + single-flight
+  pinner.ts        Fire-and-forget IPFS pinning with cross-isolate dedup
+  encoding.ts      ABI / hex / base32 / base36 helpers
+  types.ts         Shared types
 ```
 
-## Caching strategy
+## Caching
 
-Three caching layers reduce latency and RPC calls:
+Three layers, each independently tunable in `src/constants.ts`:
 
-| Layer                 | Storage           | TTL                | Purpose                               |
-| --------------------- | ----------------- | ------------------ | ------------------------------------- |
-| **CDN cache**         | Deno Deploy edge  | 300s + SWR         | Full HTTP responses (proxied content) |
-| **In-process memory** | Isolate `Map`     | 30s                | Hot resolution keys, stampede dedup   |
-| **Resolution cache**  | In-process memory | 300s pos / 60s neg | Name → contenthash mappings           |
+- **Resolution** (name → contenthash) — 5 min positive / 1 min negative, with single-flight stampede
+  protection and stale-while-revalidate. Cross-isolate persistence via Deno KV.
+- **IPNS → CID** — 30 min positive / 1 min negative. Resolved via the IPFS Routing V1 API, with a
+  HEAD-based gateway race as fallback.
+- **Content** (HTTP responses) — browser: 60 s freshness + 1-day SWR; Deno Deploy edge: 300 s + SWR.
 
-The CDN layer (`Deno-CDN-Cache-Control` header with `stale-while-revalidate`) handles the bulk of
-content caching at zero code cost. The in-process memory cache absorbs burst traffic and prevents
-cache stampedes on cold isolates.
+## Deployment
 
-## Environment variables
+This project deploys to [Deno Deploy](https://deno.com/deploy). See their
+[getting started guide](https://docs.deno.com/deploy/getting_started/) — the entry point and runtime
+config are declared in [`deno.json`](./deno.json).
 
-| Variable          | Default | Description                                          |
-| ----------------- | ------- | ---------------------------------------------------- |
-| `RPC_URL`         | (none)  | Dedicated RPC endpoint, prepended to the public pool |
-| `RESOLVE_TTL`     | `300`   | Override positive resolution cache TTL (seconds)     |
-| `RESOLVE_NEG_TTL` | `60`    | Override negative resolution cache TTL (seconds)     |
-| `CONTENT_TTL`     | `300`   | Override proxied content cache TTL (seconds)         |
-
-See `.env.example` for local development configuration.
+For a custom apex domain, update `APEX_DOMAIN` in [`src/constants.ts`](./src/constants.ts) and
+configure wildcard DNS per the
+[Deno Deploy custom domains docs](https://docs.deno.com/deploy/classic/custom-domains/).
 
 ## License
 
-MIT — same as the parent gwei-names project.
+MIT — see [LICENSE](./LICENSE).
