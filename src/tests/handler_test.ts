@@ -282,6 +282,34 @@ Deno.test("loopback host serves the homepage (local preview)", async () => {
   assertStringIncludes(await res.text(), "the decentralized world");
 });
 
+Deno.test("apex homepage: carries SEO + social metadata", async () => {
+  const res = await handle(new Request("http://gwei.site/"));
+  const body = await res.text();
+  assertStringIncludes(body, 'rel="canonical"');
+  assertStringIncludes(body, "summary_large_image");
+  assertStringIncludes(body, "https://gwei.site/og.png");
+  assertStringIncludes(body, "application/ld+json");
+});
+
+Deno.test("apex /robots.txt: served as text/plain", async () => {
+  const res = await handle(new Request("http://gwei.site/robots.txt"));
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("content-type"), "text/plain; charset=utf-8");
+  assertStringIncludes(await res.text(), "User-agent: *");
+});
+
+Deno.test("apex /og.png: served as image/png", async () => {
+  const res = await handle(new Request("http://gwei.site/og.png"));
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("content-type"), "image/png");
+});
+
+Deno.test("apex /favicon.ico: served as the SVG glyph", async () => {
+  const res = await handle(new Request("http://gwei.site/favicon.ico"));
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("content-type"), "image/svg+xml");
+});
+
 Deno.test("name normalization: uppercase subdomain resolves lowercased", async () => {
   resetState();
   using _fetchStub = createFetchStub({});

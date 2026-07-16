@@ -1,13 +1,13 @@
 {
   "tasks": {
-    "dev": "deno serve --watch --allow-net --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN main.ts",
-    "start": "deno run --allow-net --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN main.ts",
-    "test": "deno test --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN",
-    "test:coverage": "deno test --coverage=cov/ --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN",
+    "dev": "deno serve --watch --allow-net --allow-read=assets --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN main.ts",
+    "start": "deno run --allow-net --allow-read=assets --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN main.ts",
+    "test": "deno test --allow-read=assets --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN",
+    "test:coverage": "deno test --coverage=cov/ --allow-read=assets --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN",
     "lint": "deno lint",
     "fmt": "deno fmt",
     "check": "deno check main.ts",
-    "ci": "deno fmt --check && deno lint && deno test --coverage=cov/ --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN"
+    "ci": "deno fmt --check && deno lint && deno test --coverage=cov/ --allow-read=assets --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN"
   },
   "compilerOptions": {
     "strict": true,

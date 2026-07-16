@@ -20,8 +20,7 @@ export async function handle(request: Request): Promise<Response> {
   const sub = parseSubdomain(host);
   if (!sub) {
     if (isHomepageHost(host)) {
-      console.info(`[handler] homepage: ${host}`);
-      return homepageResponse();
+      return apexRoute(url.pathname);
     }
     console.info(`[handler] not a gwei name: ${host}`);
     return page("gwei gateway", "<p>Not a gwei name.</p>", 404);
@@ -92,6 +91,50 @@ function homepageResponse(): Response {
     }),
   );
   return new Response(renderHomepage(), { status: 200, headers });
+}
+
+const ASSETS_DIR = new URL("../assets/", import.meta.url);
+
+async function apexRoute(pathname: string): Promise<Response> {
+  switch (pathname) {
+    case "/robots.txt":
+      return robotsResponse();
+    case "/og.png":
+      return await assetResponse("og.png", "image/png");
+    case "/favicon.svg":
+      return await assetResponse("favicon.svg", "image/svg+xml");
+    case "/favicon.ico":
+      return await assetResponse("favicon.svg", "image/svg+xml");
+    default:
+      console.info("[handler] homepage");
+      return homepageResponse();
+  }
+}
+
+async function assetResponse(file: string, contentType: string): Promise<Response> {
+  try {
+    const data = await Deno.readFile(new URL(file, ASSETS_DIR));
+    const headers = harden(
+      new Headers({
+        "content-type": contentType,
+        "cache-control": "public, max-age=86400",
+      }),
+    );
+    return new Response(data, { status: 200, headers });
+  } catch {
+    return page("gwei gateway", "<p>Not found.</p>", 404);
+  }
+}
+
+function robotsResponse(): Response {
+  const body = "User-agent: *\nAllow: /\n";
+  const headers = harden(
+    new Headers({
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "public, max-age=86400",
+    }),
+  );
+  return new Response(body, { status: 200, headers });
 }
 
 /** Liveness probe response (JSON, never cached). */

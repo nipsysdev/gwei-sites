@@ -15,13 +15,41 @@ export function renderHomepage(): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>gwei.site — a door to the decentralized world</title>
 <meta name="description" content="Every name on gwei.site is a key to the open web. No apps, no setup — just type a name and step through.">
+<meta name="author" content="xav.gwei">
 <meta name="theme-color" content="#070B14">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://gwei.site/">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
+<!-- Open Graph -->
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="gwei.site">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://gwei.site/">
 <meta property="og:title" content="gwei.site — a door to the decentralized world">
 <meta property="og:description" content="Every name on gwei.site is a key to the open web. No apps, no setup — just type a name and step through.">
+<meta property="og:image" content="https://gwei.site/og.png">
+<meta property="og:image:secure_url" content="https://gwei.site/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A glowing arched doorway to the decentralized web, with the wordmark gwei.site">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="gwei.site — a door to the decentralized world">
+<meta name="twitter:description" content="Every name on gwei.site is a key to the open web. No apps, no setup — just type a name and step through.">
+<meta name="twitter:image" content="https://gwei.site/og.png">
+<meta name="twitter:image:alt" content="A glowing arched doorway to the decentralized web">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- Structured data -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebSite","name":"gwei.site","alternateName":"gwei gateway","url":"https://gwei.site/","description":"Every name on gwei.site is a key to the open web. No apps, no setup — just type a name and step through.","image":"https://gwei.site/og.png"}
+</script>
 <style>
   :root {
     --bg: #070b14;
