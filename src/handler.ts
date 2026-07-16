@@ -1,6 +1,10 @@
 import { APEX_DOMAIN, PAGE_HEAD, SECURITY_HEADERS } from "./constants.ts";
+import { renderHomepage } from "./homepage.ts";
 import { proxyContent } from "./proxy.ts";
 import { resolveName } from "./resolver.ts";
+
+const APEX_HOST = APEX_DOMAIN.slice(1); // ".gwei.site" → "gwei.site"
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 // Main request handler — branches on the resolver's status: error → 502,
 // ref → proxy (or 504 if all gateways fail), none → 404, unsupported → 415.
@@ -15,6 +19,10 @@ export async function handle(request: Request): Promise<Response> {
 
   const sub = parseSubdomain(host);
   if (!sub) {
+    if (isHomepageHost(host)) {
+      console.info(`[handler] homepage: ${host}`);
+      return homepageResponse();
+    }
     console.info(`[handler] not a gwei name: ${host}`);
     return page("gwei gateway", "<p>Not a gwei name.</p>", 404);
   }
@@ -76,6 +84,16 @@ export function page(
   return new Response(html, { status, headers });
 }
 
+function homepageResponse(): Response {
+  const headers = harden(
+    new Headers({
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "public, max-age=300",
+    }),
+  );
+  return new Response(renderHomepage(), { status: 200, headers });
+}
+
 /** Liveness probe response (JSON, never cached). */
 function healthResponse(): Response {
   return new Response(
@@ -104,6 +122,10 @@ export function parseSubdomain(host: string): string | null {
   if (!host.endsWith(APEX_DOMAIN)) return null;
   const sub = host.slice(0, -APEX_DOMAIN.length);
   return sub || null;
+}
+
+export function isHomepageHost(host: string): boolean {
+  return host === APEX_HOST || LOOPBACK_HOSTS.has(host);
 }
 
 /**

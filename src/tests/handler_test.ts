@@ -267,10 +267,19 @@ Deno.test("non-gwei host: returns 404 without calling fetch", async () => {
   assertEquals(fetchCalled, false);
 });
 
-Deno.test("apex domain: returns 404", async () => {
+Deno.test("apex domain: serves the homepage", async () => {
   resetState();
   const res = await handle(new Request("http://gwei.site/"));
-  assertEquals(res.status, 404);
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("content-type"), "text/html; charset=utf-8");
+  assertStringIncludes(await res.text(), "the decentralized world");
+});
+
+Deno.test("loopback host serves the homepage (local preview)", async () => {
+  resetState();
+  const res = await handle(new Request("http://localhost:8000/"));
+  assertEquals(res.status, 200);
+  assertStringIncludes(await res.text(), "the decentralized world");
 });
 
 Deno.test("name normalization: uppercase subdomain resolves lowercased", async () => {
