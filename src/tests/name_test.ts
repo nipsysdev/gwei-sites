@@ -1,7 +1,7 @@
 // Unit tests for the name parsing/normalization utilities.
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { normalizeName, parseSubdomain } from "../name.ts";
+import { normalizeName, parseSubdomain } from "../handler.ts";
 
 Deno.test("normalizeName: appends .gwei suffix", () => {
   assertEquals(normalizeName("xav"), "xav.gwei");

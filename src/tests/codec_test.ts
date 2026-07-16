@@ -1,7 +1,7 @@
 // Unit tests for contenthash codec decoding, using real published vectors.
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { decodeContenthash } from "../codec.ts";
+import { decodeContenthash } from "../resolver.ts";
 
 /** Wrap raw contenthash payload hex in an ABI `bytes` response: offset + length + data. */
 function abiBytes(payloadHex: string): string {

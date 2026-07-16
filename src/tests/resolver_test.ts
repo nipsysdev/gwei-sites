@@ -3,7 +3,7 @@
 
 import { assertEquals } from "jsr:@std/assert@1";
 import { stub } from "jsr:@std/testing@1/mock";
-import { memClear, memGet } from "../cache.ts";
+import { cacheClear, cacheGet } from "../cache.ts";
 import { resolveName } from "../resolver.ts";
 
 const COMPUTE_ID = "0x" + "0".repeat(63) + "1";
@@ -37,9 +37,9 @@ function rpcSequenceStub(sequence: string[]) {
 }
 
 Deno.test("resolveName: resolves an IPFS contenthash and returns the decoded ref", async () => {
-  memClear();
+  cacheClear();
   using _ = rpcSequenceStub([COMPUTE_ID, abiBytes(IPFS_PAYLOAD)]);
-  assertEquals(await resolveName("xav.gwei", ["https://rpc"]), {
+  assertEquals(await resolveName("xav.gwei"), {
     status: "ref",
     kind: "ipfs",
     ref: IPFS_REF,
@@ -47,7 +47,7 @@ Deno.test("resolveName: resolves an IPFS contenthash and returns the decoded ref
 });
 
 Deno.test("resolveName: serves the second call from cache (no new RPC)", async () => {
-  memClear();
+  cacheClear();
   let calls = 0;
   using _ = stub(globalThis, "fetch", () => {
     calls++;
@@ -62,28 +62,28 @@ Deno.test("resolveName: serves the second call from cache (no new RPC)", async (
       ),
     );
   });
-  await resolveName("cache.gwei", ["https://rpc"]);
+  await resolveName("cache.gwei");
   const afterFirst = calls;
-  await resolveName("cache.gwei", ["https://rpc"]);
+  await resolveName("cache.gwei");
   assertEquals(calls, afterFirst);
 });
 
 Deno.test("resolveName: caches a 'none' result as negative", async () => {
-  memClear();
+  cacheClear();
   const empty = "0x" + "0".repeat(64) + "0".repeat(64);
   using _ = rpcSequenceStub([COMPUTE_ID, empty]);
-  assertEquals(await resolveName("empty.gwei", ["https://rpc"]), { status: "none" });
-  assertEquals(memGet("resolve:empty.gwei"), { status: "none" });
+  assertEquals(await resolveName("empty.gwei"), { status: "none" });
+  assertEquals(cacheGet("resolve:empty.gwei"), { status: "none" });
 });
 
 Deno.test("resolveName: caches an RPC failure with a short negative TTL", async () => {
-  memClear();
+  cacheClear();
   using _ = stub(
     globalThis,
     "fetch",
     () => Promise.resolve(new Response("err", { status: 500 })),
   );
-  assertEquals(await resolveName("broken.gwei", ["https://rpc"]), { status: "error" });
+  assertEquals(await resolveName("broken.gwei"), { status: "error" });
   // The error is cached so a burst does not hammer the RPC.
-  assertEquals(memGet("resolve:broken.gwei"), { status: "error" });
+  assertEquals(cacheGet("resolve:broken.gwei"), { status: "error" });
 });

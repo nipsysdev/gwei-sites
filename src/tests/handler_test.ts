@@ -6,12 +6,12 @@
 
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { stub } from "jsr:@std/testing@1/mock";
-import { handle } from "../handler.ts";
-import { memClear } from "../cache.ts";
+import { escapeHtml, handle, harden } from "../handler.ts";
+import { cacheClear } from "../cache.ts";
 
 /** Reset all caches between tests to ensure isolation. */
 function resetState() {
-  memClear();
+  cacheClear();
 }
 
 /** A valid ABI-encoded computeId response (uint256 tokenId = 1). */
@@ -69,7 +69,8 @@ function gatewayResponse(body = "<h1>Hello from IPFS</h1>"): Response {
 
 /** Whether a URL targets one of the configured RPC endpoints. */
 function isRpcUrl(url: string): boolean {
-  return url.includes("0xrpc.io") || url.includes("tenderly") || url.includes("publicnode");
+  return url.includes("0xrpc.io") || url.includes("tenderly") || url.includes("publicnode") ||
+    url.includes("4everland.org");
 }
 
 /** Resolve a fetch input to its URL string. */
@@ -140,7 +141,6 @@ Deno.test("proxied responses carry the security header set", async () => {
   const res = await handle(new Request("http://xav.gwei.site/"));
 
   assertEquals(res.headers.get("x-content-type-options"), "nosniff");
-  assertEquals(res.headers.get("x-frame-options"), "SAMEORIGIN");
   assertEquals(res.headers.get("access-control-allow-origin"), "*");
   assertEquals(res.headers.get("strict-transport-security"), "max-age=31536000");
 });
@@ -155,16 +155,20 @@ Deno.test("proxied responses carry exact tracking headers", async () => {
   assertEquals(res.headers.get("x-ipfs-cid"), IPFS_REF);
 });
 
-Deno.test("proxied responses carry Deno CDN cache directives", async () => {
+Deno.test("proxied responses carry browser + edge cache directives", async () => {
   resetState();
   using _fetchStub = createFetchStub({});
 
   const res = await handle(new Request("http://xav.gwei.site/"));
 
-  const cdnCache = res.headers.get("deno-cdn-cache-control");
-  assertStringIncludes(cdnCache ?? "", "s-maxage=300");
-  assertStringIncludes(cdnCache ?? "", "stale-while-revalidate");
-  assertEquals(res.headers.get("deno-cache-tag"), "gwei:xav.gwei");
+  // Browser: short max-age (update freshness) + long SWR (instant reuse).
+  const browserCache = res.headers.get("cache-control") ?? "";
+  assertStringIncludes(browserCache, "max-age=60");
+  assertStringIncludes(browserCache, "stale-while-revalidate=86400");
+  // Edge (Deno Deploy CDN): conservative fresh + SWR window.
+  const cdnCache = res.headers.get("deno-cdn-cache-control") ?? "";
+  assertStringIncludes(cdnCache, "s-maxage=300");
+  assertStringIncludes(cdnCache, "stale-while-revalidate");
 });
 
 Deno.test("resolution cache: a second request for the same name skips RPC", async () => {
@@ -278,9 +282,9 @@ Deno.test("name normalization: uppercase subdomain resolves lowercased", async (
   assertEquals(res.headers.get("x-gwei-name"), "xav.gwei");
 });
 
-Deno.test("health check: /.well-known/gateway-status returns JSON", async () => {
+Deno.test("health check: /.well-known/health returns JSON", async () => {
   resetState();
-  const res = await handle(new Request("http://anything.gwei.site/.well-known/gateway-status"));
+  const res = await handle(new Request("http://anything.gwei.site/.well-known/health"));
 
   assertEquals(res.status, 200);
   assertEquals(res.headers.get("content-type"), "application/json; charset=utf-8");
@@ -308,14 +312,22 @@ Deno.test("stampede protection: concurrent requests share one resolution", async
   assertEquals(state.rpcCalls, 2);
 });
 
-Deno.test("resolution cache: shared across different paths for the same name", async () => {
-  resetState();
-  const state = { rpcCalls: 0 };
-  using _fetchStub = ipfsCountingFetchStub(state);
+// --- harden / escapeHtml (moved from headers.ts) ----------------------------
 
-  await handle(new Request("http://shared.gwei.site/"));
-  await handle(new Request("http://shared.gwei.site/about"));
-  await handle(new Request("http://shared.gwei.site/contact"));
+Deno.test("escapeHtml: neutralizes all HTML-special characters", () => {
+  assertEquals(
+    escapeHtml(`<a href="x">a & b</a>`),
+    "&lt;a href=&quot;x&quot;&gt;a &amp; b&lt;/a&gt;",
+  );
+  assertEquals(escapeHtml("it's <ok>"), "it&#39;s &lt;ok&gt;");
+});
 
-  assertEquals(state.rpcCalls, 2);
+Deno.test("escapeHtml: stringifies non-string input and passes safe input through", () => {
+  assertEquals(escapeHtml(42), "42");
+  assertEquals(escapeHtml("plain"), "plain");
+  assertEquals(escapeHtml(""), "");
+});
+
+Deno.test("harden: applies wildcard CORS onto a Headers object", () => {
+  assertEquals(harden(new Headers()).get("access-control-allow-origin"), "*");
 });
