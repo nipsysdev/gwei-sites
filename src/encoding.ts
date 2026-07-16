@@ -1,43 +1,9 @@
-// Hex, base32, base36, and ABI encoding helpers — all pure functions with no I/O.
+// Hex, base32, base36, and ABI encoding helpers — pure functions, no I/O.
+// Used by resolver.ts (ABI calldata for eth_call + contenthash decoding).
 
-import { B32 } from "./constants.ts";
+import { B32, B36 } from "./constants.ts";
 
-/** RFC 4648 base32 alphabet (lowercase, no padding). */
-// B32 imported from constants.
-
-/** Base36 alphabet (lowercase alphanumeric) for multibase `k` prefix encoding. */
-const B36 = "0123456789abcdefghijklmnopqrstuvwxyz";
-
-/** Left-pad a hex string to 64 characters (32 bytes / one ABI word). */
-export function pad32(h: string): string {
-  return h.padStart(64, "0");
-}
-
-/** Convert a Uint8Array to a lowercase hex string (no 0x prefix). */
-export function toHex(b: Uint8Array): string {
-  let out = "";
-  for (const x of b) {
-    out += x.toString(16).padStart(2, "0");
-  }
-  return out;
-}
-
-/** Convert a hex string (no 0x prefix required) to a Uint8Array. */
-export function hexToBytes(h: string): Uint8Array {
-  const clean = h.replace(/^0x/, "");
-  const bytes = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
-  }
-  return bytes;
-}
-
-/**
- * ABI-encode a single dynamic `string` argument, prefixed with a 4-byte selector.
- * Returns a full calldata hex string including the `0x` prefix.
- *
- * Layout: 0x + selector(4) + offset(32=0x20) + length(32) + data(padded to 32)
- */
+/** ABI-encode a `string` arg with a 4-byte selector → full calldata (0x-prefixed). */
 export function encodeString(selector: string, str: string): string {
   const bytes = new TextEncoder().encode(str);
   let data = toHex(bytes);
@@ -45,10 +11,7 @@ export function encodeString(selector: string, str: string): string {
   return "0x" + selector + pad32("20") + pad32(bytes.length.toString(16)) + data;
 }
 
-/**
- * Base32-encode a Uint8Array using the RFC 4648 lowercase alphabet (no padding).
- * Used to convert IPFS CIDv1 multihash bytes to the multibase `b` string.
- */
+/** RFC 4648 lowercase base32 (no padding). Encodes IPFS CIDv1 bytes for multibase `b`. */
 export function base32(bytes: Uint8Array): string {
   let bits = 0;
   let val = 0;
@@ -66,12 +29,8 @@ export function base32(bytes: Uint8Array): string {
 }
 
 /**
- * Base36-encode a Uint8Array using the lowercase alphanumeric alphabet.
- * Used to convert IPNS CIDv1 bytes to the multibase `k` string (the standard
- * representation for libp2p-key CIDs in IPNS gateway URLs).
- *
- * Unlike base32/base64, base36 is not a power of 2, so this requires BigInt
- * arithmetic: convert bytes to a big-endian BigInt, then repeatedly divide by 36.
+ * Lowercase base36 (used for IPNS libp2p-key CIDv1 → multibase `k`). Needs BigInt
+ * since 36 isn't a power of 2: bytes → big-endian BigInt → repeated divmod by 36.
  */
 export function base36(bytes: Uint8Array): string {
   let num = 0n;
@@ -85,4 +44,28 @@ export function base36(bytes: Uint8Array): string {
     num /= 36n;
   }
   return out;
+}
+
+/** Hex string (optional 0x prefix) → Uint8Array. */
+export function hexToBytes(h: string): Uint8Array {
+  const clean = h.replace(/^0x/, "");
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
+/** Uint8Array → lowercase hex (no 0x prefix). */
+export function toHex(b: Uint8Array): string {
+  let out = "";
+  for (const x of b) {
+    out += x.toString(16).padStart(2, "0");
+  }
+  return out;
+}
+
+/** Left-pad hex to one ABI word (64 chars / 32 bytes). */
+export function pad32(h: string): string {
+  return h.padStart(64, "0");
 }
