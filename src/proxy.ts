@@ -113,6 +113,7 @@ async function fetchViaGateways(
       headers.delete("content-length");
       headers.delete("transfer-encoding");
       headers.delete("connection");
+      headers.delete("content-disposition");
       headers.set(
         "cache-control",
         `public, max-age=${CONTENT_BROWSER_MAX_AGE}, stale-while-revalidate=${CONTENT_BROWSER_STALE}`,

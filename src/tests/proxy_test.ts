@@ -109,3 +109,23 @@ Deno.test("proxyContent: does not pass through hop-by-hop content-encoding", asy
   assertEquals(res?.headers.get("content-encoding"), null);
   assertEquals(res?.headers.get("content-length"), null);
 });
+
+Deno.test("proxyContent: strips Content-Disposition so websites render inline", async () => {
+  using _ = stub(
+    globalThis,
+    "fetch",
+    () =>
+      Promise.resolve(
+        new Response("<h1>ok</h1>", {
+          status: 200,
+          headers: {
+            "content-type": "text/html",
+            "content-disposition": "attachment",
+          },
+        }),
+      ),
+  );
+  const res = await proxyContent("ipfs", "bafyfake", "xav.gwei", "/", "", "*/*");
+  assertEquals(res?.status, 200);
+  assertEquals(res?.headers.get("content-disposition"), null);
+});
