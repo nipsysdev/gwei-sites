@@ -49,7 +49,6 @@ export const ROUTING_V1_ENDPOINT = "https://delegated-ipfs.dev/routing/v1/ipns";
 
 // Public Swarm gateways
 export const SWARM_GATEWAYS = [
-  "https://gateway.ethswarm.org",
   "https://download.gateway.ethswarm.org",
 ];
 
