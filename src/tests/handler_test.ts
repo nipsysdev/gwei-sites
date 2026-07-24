@@ -8,6 +8,7 @@ import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { stub } from "jsr:@std/testing@1/mock";
 import { escapeHtml, handle, harden } from "../handler.ts";
 import { cacheClear } from "../cache.ts";
+import { ConfigBuilder, resetConfig, setConfig } from "../config.ts";
 
 /** Reset all caches between tests to ensure isolation. */
 function resetState() {
@@ -265,6 +266,61 @@ Deno.test("non-gwei host: returns 404 without calling fetch", async () => {
   assertEquals(res.status, 404);
   assertStringIncludes(await res.text(), "Not a gwei name");
   assertEquals(fetchCalled, false);
+});
+
+// --- custom-domain aliases -------------------------------------------------
+
+Deno.test("custom domain: resolves the mapped .gwei name and proxies content", async () => {
+  resetState();
+  setConfig(new ConfigBuilder().customDomains("xav.dev=xav.gwei").build());
+  try {
+    using _fetchStub = createFetchStub({});
+
+    const res = await handle(new Request("http://xav.dev/"));
+
+    assertEquals(res.status, 200);
+    assertStringIncludes(await res.text(), "Hello from IPFS");
+    // The mapped name is reported, not the host.
+    assertEquals(res.headers.get("x-gwei-name"), "xav.gwei");
+  } finally {
+    resetConfig();
+  }
+});
+
+Deno.test("custom domain: shares the resolution cache with the *.gwei.site host", async () => {
+  resetState();
+  setConfig(new ConfigBuilder().customDomains("xav.dev=xav.gwei").build());
+  const state = { rpcCalls: 0 };
+  using _fetchStub = ipfsCountingFetchStub(state);
+  try {
+    // First hit resolves xav.gwei on-chain (computeId + contenthash).
+    await handle(new Request("http://xav.gwei.site/"));
+    assertEquals(state.rpcCalls, 2);
+    // Same name via the alias → served from cache, no new RPC.
+    await handle(new Request("http://xav.dev/about"));
+    assertEquals(state.rpcCalls, 2);
+  } finally {
+    resetConfig();
+  }
+});
+
+Deno.test("custom domain: an unmapped host still returns 404 without fetch", async () => {
+  resetState();
+  setConfig(new ConfigBuilder().customDomains("xav.dev=xav.gwei").build());
+  let fetchCalled = false;
+  using _fetchStub = stub(globalThis, "fetch", () => {
+    fetchCalled = true;
+    return Promise.resolve(new Response("should not reach", { status: 200 }));
+  });
+  try {
+    const res = await handle(new Request("http://other.dev/"));
+
+    assertEquals(res.status, 404);
+    assertStringIncludes(await res.text(), "Not a gwei name");
+    assertEquals(fetchCalled, false);
+  } finally {
+    resetConfig();
+  }
 });
 
 Deno.test("apex domain: serves the homepage", async () => {

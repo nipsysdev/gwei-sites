@@ -61,6 +61,22 @@ public endpoints only.
 
 Set these in Deno Deploy → Settings → Environment Variables.
 
+### Custom domains
+
+A custom domain (e.g. `xav.dev`) can serve the same content as a `.gwei` name. Set `CUSTOM_DOMAINS`
+to a comma-separated list of `host=name` pairs, where `name` is the full `.gwei` name to resolve
+on-chain:
+
+```sh
+CUSTOM_DOMAINS=xav.dev=xav.gwei
+CUSTOM_DOMAINS=xav.dev=xav.gwei,blog.example.com=blog.gwei
+```
+
+Point each domain at the gateway (DNS CNAME + a
+[Deno Deploy custom domain](https://docs.deno.com/deploy/classic/custom-domains/) so TLS is
+terminated). The gateway then resolves the mapped name exactly as it would for `xav.gwei.site` —
+same resolution, caching, and pinning — so both hosts share one on-chain lookup.
+
 ## Architecture
 
 ```

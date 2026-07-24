@@ -1,4 +1,5 @@
 import { APEX_DOMAIN, PAGE_HEAD, SECURITY_HEADERS } from "./constants.ts";
+import { getConfig } from "./config.ts";
 import { renderHomepage } from "./homepage.ts";
 import { proxyContent } from "./proxy.ts";
 import { resolveName } from "./resolver.ts";
@@ -18,15 +19,21 @@ export async function handle(request: Request): Promise<Response> {
   }
 
   const sub = parseSubdomain(host);
-  if (!sub) {
-    if (isHomepageHost(host)) {
-      return apexRoute(url.pathname);
+  let name: string;
+  if (sub) {
+    name = normalizeName(sub);
+  } else if (isHomepageHost(host)) {
+    return apexRoute(url.pathname);
+  } else {
+    // Custom-domain alias: host → full `.gwei` name (e.g. xav.dev → xav.gwei).
+    const alias = getConfig().customDomains.get(host);
+    if (!alias) {
+      console.info(`[handler] not a gwei name: ${host}`);
+      return page("gwei gateway", "<p>Not a gwei name.</p>", 404);
     }
-    console.info(`[handler] not a gwei name: ${host}`);
-    return page("gwei gateway", "<p>Not a gwei name.</p>", 404);
+    name = alias;
   }
 
-  const name = normalizeName(sub);
   const r = await resolveName(name);
 
   switch (r.status) {
