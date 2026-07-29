@@ -24,6 +24,16 @@ Deno.test("proxyContent: returns the first successful gateway response", async (
   assertEquals(res?.headers.get("x-ipfs-cid"), "bafyfake");
 });
 
+Deno.test("proxyContent: percent-encodes non-ASCII names in response headers", async () => {
+  using _ = stub(
+    globalThis,
+    "fetch",
+    () => Promise.resolve(new Response("<h1>ok</h1>", { status: 200 })),
+  );
+  const res = await proxyContent("ipfs", "bafyfake", "🐳.gwei", "/", "", "*/*");
+  assertEquals(decodeURIComponent(res?.headers.get("x-gwei-name") ?? ""), "🐳.gwei");
+});
+
 Deno.test("proxyContent: accepts 304 Not Modified as a successful response", async () => {
   using _ = stub(
     globalThis,

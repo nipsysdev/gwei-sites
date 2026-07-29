@@ -19,6 +19,11 @@ Deno.test("normalizeName: trims whitespace", () => {
   assertEquals(normalizeName("\txav\n"), "xav.gwei");
 });
 
+Deno.test("normalizeName: decodes Punycode labels to the registered UTF-8 name", () => {
+  assertEquals(normalizeName("xn--7o8h"), "🐳.gwei");
+  assertEquals(normalizeName("sub.xn--7o8h"), "sub.🐳.gwei");
+});
+
 Deno.test("parseSubdomain: extracts label from valid gwei host", () => {
   assertEquals(parseSubdomain("xav.gwei.site"), "xav");
   assertEquals(parseSubdomain("z0r0z.gwei.site"), "z0r0z");

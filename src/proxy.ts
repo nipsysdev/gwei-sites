@@ -122,7 +122,9 @@ async function fetchViaGateways(
         "deno-cdn-cache-control",
         `public, s-maxage=${CONTENT_EDGE_MAX_AGE}, stale-while-revalidate=${CONTENT_EDGE_STALE}`,
       );
-      headers.set("x-gwei-name", name);
+      // Header values are ByteStrings. Percent-encoding preserves UTF-8 names while leaving
+      // ordinary ASCII names unchanged.
+      headers.set("x-gwei-name", encodeURIComponent(name));
       headers.set(header, ref);
       headers.set("x-gateway", new URL(gw).hostname);
 

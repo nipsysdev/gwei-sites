@@ -135,6 +135,18 @@ Deno.test("happy path: resolves an IPFS name and proxies content", async () => {
   assertStringIncludes(await res.text(), "Hello from IPFS");
 });
 
+Deno.test("emoji hostname is decoded from Punycode before resolution", async () => {
+  resetState();
+  using _fetchStub = createFetchStub({});
+
+  // Request/URL normalizes the Unicode hostname to xn--7o8h before the handler sees it.
+  const res = await handle(new Request("http://🐳.gwei.site/"));
+
+  assertEquals(res.status, 200);
+  assertEquals(decodeURIComponent(res.headers.get("x-gwei-name")!), "🐳.gwei");
+  assertStringIncludes(await res.text(), "Hello from IPFS");
+});
+
 Deno.test("proxied responses carry the security header set", async () => {
   resetState();
   using _fetchStub = createFetchStub({});

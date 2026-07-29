@@ -1,3 +1,4 @@
+import { domainToUnicode } from "node:url";
 import { APEX_DOMAIN, PAGE_HEAD, SECURITY_HEADERS } from "./constants.ts";
 import { getConfig } from "./config.ts";
 import { renderHomepage } from "./homepage.ts";
@@ -162,9 +163,10 @@ function healthResponse(): Response {
   );
 }
 
-/** Normalize a subdomain label into a full `.gwei` name (lowercased + trimmed). */
+/** Normalize a DNS subdomain into the UTF-8 name registered on-chain. */
 export function normalizeName(sub: string): string {
-  return sub.toLowerCase().trim() + ".gwei";
+  const ascii = sub.toLowerCase().trim();
+  return (domainToUnicode(ascii) || ascii) + ".gwei";
 }
 
 /** Extract the subdomain label from a hostname, or null if not a `*.gwei.site` subdomain. */
