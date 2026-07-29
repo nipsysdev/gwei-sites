@@ -1,7 +1,7 @@
 {
   "tasks": {
     "dev": "deno serve --watch --allow-net --allow-read=assets --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN,CUSTOM_DOMAINS main.ts",
-    "start": "deno run --allow-net --allow-read=assets --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN,CUSTOM_DOMAINS main.ts",
+    "start": "deno serve --allow-net --allow-read=assets --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN,CUSTOM_DOMAINS main.ts",
     "test": "deno test --allow-read=assets --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN,CUSTOM_DOMAINS",
     "test:coverage": "deno test --coverage=cov/ --allow-read=assets --allow-env=RPC_KEY,RPC_KEY_FALLBACK,DEDICATED_GATEWAY,PIN_TOKEN,CUSTOM_DOMAINS",
     "lint": "deno lint",
